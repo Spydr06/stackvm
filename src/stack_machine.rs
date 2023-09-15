@@ -38,16 +38,18 @@ pub struct StackMachine {
 
     // debugging
     term_width: u16,
+    print_dbg_info: bool,
 }
 
 impl StackMachine {
-    pub fn new() -> Self {
+    pub fn new(print_dbg_info: bool) -> Self {
         let term_size = termsize::get().unwrap_or(termsize::Size { rows: 25, cols: 80 });
         Self {
             instruction_ptr: 0usize,
             stack: vec![],
             exited: None,
             term_width: term_size.cols,
+            print_dbg_info
         }
     }
 
@@ -83,7 +85,9 @@ impl StackMachine {
     }
 
     pub fn run(&mut self, instructions: &[Instruction]) -> ExecResult<i32> {
-        self.disassembly(instructions);
+        if self.print_dbg_info {
+            self.disassembly(instructions);
+        }
 
         while self.exited.is_none() && self.instruction_ptr < instructions.len() {
             self.eval(&instructions[self.instruction_ptr])?;

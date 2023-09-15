@@ -1,32 +1,64 @@
 #![feature(let_chains)]
 
-mod stack_machine;
 mod assembler;
+mod binary;
 mod instruction;
+mod stack_machine;
 
-use stack_machine::*;
 use assembler::*;
+use stack_machine::*;
+
+use crate::binary::Binary;
+
+#[derive(clap::Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    filepath: String,
+
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    run: bool,
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    assemble: bool,
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    verbose: bool,
+
+    #[arg(short)]
+    output_filepath: Option<String>
+}
+
+fn main() {
+    use clap::Parser;
+    let args = Cli::parse();
+
+    let instructions;
+    if args.assemble {
+        let mut parser = AsmParser::new(args.filepath);
+        match parser.assemble() {
+            Err(err) => die(err),
+            Ok(inst) => instructions = inst
+        }
+    }
+    else {
+        match Binary::load_from(args.filepath) {
+            Err(err) => die(err),
+            Ok(binary) => instructions = binary.instructions()
+        }
+    }
+
+    if args.run {
+        let mut machine = StackMachine::new(args.verbose);
+        match machine.run(&instructions) {
+            Ok(exit_code) => println!("[simulation exited with code {}]", exit_code),
+            Err(err) => die(err)
+        }
+    }
+    else if let Some(filepath) = args.output_filepath &&
+            let Err(err) = Binary::from_instructions(instructions).save_to(filepath) {
+        die(err);
+    }
+}
 
 fn die(err: impl std::fmt::Display) -> ! {
     eprintln!("{}", err);
     std::process::exit(1);
-}
-
-fn main() {
-    let mut args = std::env::args();
-    if args.len() != 2 {
-        die(format!("Usage: {} <source file>", args.next().unwrap_or("stasm".to_string())))
-    }
-
-    let mut parser = AsmParser::new(args.nth(1).unwrap());
-    let instructions = parser.assemble();
-    if let Err(err) = instructions {
-        die(err);
-    }
-
-    let mut machine = StackMachine::new();
-    match machine.run(&instructions.unwrap()) {
-        Ok(exit_code) => println!("[simulation exited with code {}]", exit_code),
-        Err(err) => die(err)
-    }
 }
