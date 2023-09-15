@@ -1,0 +1,12 @@
+; count from 10 down to 1
+
+    PUSH 10 ; initial value
+loop:
+    DUP      ; duplicate value
+    PRINTOUT ; print
+    PUSH 1
+    SWAP     ; swap for correct ordering
+    SUB      ; subtract 1 from value
+    DUP      ; duplicate for loop
+    JNZ loop ; jump if value != 0
+    EXIT

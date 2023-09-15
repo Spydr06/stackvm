@@ -1,22 +1,30 @@
 #![feature(let_chains)]
 
 mod stack_machine;
+mod assembler;
+mod instruction;
 
 use stack_machine::*;
 
+use assembler::*;
+
 fn main() {
+    let mut args = std::env::args();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <source file>", args.next().unwrap_or("stasm".to_string()));
+        std::process::exit(1);
+    }
+
+    let mut parser = AsmParser::new(args.nth(1).unwrap());
+    let instructions = parser.assemble();
+    if let Err(err) = instructions {
+        eprintln!("{}", err);
+        std::process::exit(1);
+    }
+
     let mut machine = StackMachine::new();
-
-    let instructions = [
-        Instruction::new(Mnemonic::PUSH, &[4]),
-        Instruction::new(Mnemonic::PUSH, &[5]),
-        Instruction::new(Mnemonic::ADD, &[]),
-        Instruction::new(Mnemonic::DUP, &[]),
-        Instruction::new(Mnemonic::MUL, &[]),
-        Instruction::new(Mnemonic::PRINTOUT, &[]),
-        Instruction::new(Mnemonic::EXIT, &[]),
-    ];
-
-    let exit_code = machine.run(&instructions);
-    println!("[simulation exited with code {}]", exit_code);
+    match machine.run(&instructions.unwrap()) {
+        Ok(exit_code) => println!("[simulation exited with code {}]", exit_code),
+        Err(err) => println!("{}", err)
+    }
 }

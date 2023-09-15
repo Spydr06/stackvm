@@ -1,52 +1,17 @@
 use colored::Colorize;
-use core::fmt;
+use crate::instruction::*;
 
-pub type Value = i64;
+pub type ExecResult<T> = Result<T, ExecError>;
 
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
-pub enum Mnemonic {
-    PUSH,
-    POP,
-    DUP,
-    ADD,
-    SUB,
-    MUL,
-    DIV,
-    EXIT,
-    PRINTOUT,
+#[derive(Debug)]
+pub struct ExecError {
+    addr: usize,
+    err: String
 }
 
-impl Into<String> for Mnemonic {
-    fn into(self) -> String {
-        format!("{:?}", self)
-    }
-}
-
-impl Mnemonic {
-    pub fn to_string(self) -> String {
-        self.into()
-    }
-}
-
-pub struct Instruction<'a> {
-    mnemonic: Mnemonic,
-    args: &'a [Value],
-}
-
-impl<'a> Instruction<'a> {
-    pub fn new(mnemonic: Mnemonic, args: &'a [Value]) -> Self {
-        Self { mnemonic, args }
-    }
-}
-
-impl<'a> fmt::Display for Instruction<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:<10}", self.mnemonic.to_string().bold().magenta())?;
-        for arg in self.args {
-            write!(f, "{}\t", arg)?;
-        }
-        Ok(())
+impl std::fmt::Display for ExecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (@{}): {}", "Panic:".bold().red(), format!("{:04x}", self.addr).blue(), self.err)
     }
 }
 
@@ -113,88 +78,103 @@ impl StackMachine {
         }
     }
 
-    pub fn run(&mut self, instructions: &[Instruction]) -> i32 {
+    pub fn run(&mut self, instructions: &[Instruction]) -> ExecResult<i32> {
         self.disassembly(instructions);
 
         while self.exited.is_none() && self.instruction_ptr < instructions.len() {
-            self.eval(&instructions[self.instruction_ptr]);
+            self.eval(&instructions[self.instruction_ptr])?;
         }
 
-        if let Some(exit_code) = self.exited {
-            exit_code
-        } else {
-            println!(
-                "{} no instruction at {}",
-                "Panic:".bold().red(),
-                format!("{:04x}", self.instruction_ptr).blue()
-            );
-            255
+        self.exited.ok_or_else(|| self.panic("no instruction left".to_string()))
+    }
+
+    fn panic(&mut self, err: String) -> ExecError {
+        self.exited = Some(255);
+        ExecError {
+            addr: self.instruction_ptr,
+            err
         }
     }
 
-    fn panic(&mut self, reason: &str) {
-        println!(
-            "{} (@{:04x}) {}",
-            "Panic:".bold().red(),
-            self.instruction_ptr,
-            reason
-        );
-        self.exited = Some(255)
+    fn pop_stack(&mut self, mnemonic: &str) -> ExecResult<Value> {
+        self.stack.pop().ok_or_else(|| self.panic(format!("not enough values on stack for `{}`", mnemonic)))
     }
 
-    fn binop(&mut self, op: Mnemonic) {
-        if let Some(a) = self.stack.pop() && let Some(b) = self.stack.pop() {
-            use Mnemonic as M;
-            let result = match op {
-                M::ADD => a + b,
-                M::SUB => a - b,
-                M::MUL => a * b,
-                M::DIV => a / b,
-                _ => {
-                    self.panic("unreachable");
-                    0
-                }
-            };
+    fn binop(&mut self, op: &Instruction) -> ExecResult<()> {
+        let a = self.pop_stack(&op.mnemonic())?;
+        let b = self.pop_stack(&op.mnemonic())?;
 
-            self.stack.push(result);
-        }
-        else {
-            self.panic(&format!("not enough values on stack for `{}`", op.to_string()));
-        }
-    }
+        use Instruction as I;
+        let result = match op {
+            I::Add => a + b,
+            I::Sub => a - b,
+            I::Mul => a * b,
+            I::Div => a / b,
+            _ => return Err(self.panic("unreachable".to_string())),
+        };
 
-    pub fn eval(&mut self, instruction: &Instruction) {
-        use Mnemonic as M;
-        match instruction.mnemonic {
-            M::PUSH => {
-                self.stack.push(*instruction.args.get(0).unwrap_or(&0));
-            }
-            M::POP => {
-                let _ = self.stack.pop();
-            }
-            M::ADD | M::SUB | M::MUL | M::DIV => self.binop(instruction.mnemonic),
-            M::DUP => {
-                if let Some(value) = self.stack.pop() {
-                    self.stack.push(value);
-                    self.stack.push(value);
-                } else {
-                    self.panic("not enough values on stack for `DUP`");
-                }
-            }
-            M::PRINTOUT => {
-                let value = self.stack.pop();
-                if value.is_none() {
-                    self.panic("not enough values on stack for `PRINTOUT`");
-                } else {
-                    println!("{}", value.unwrap())
-                }
-            }
-            M::EXIT => {
-                let exit_code = self.stack.pop();
-                self.exited = Some(exit_code.unwrap_or(0) as i32)
-            }
-        }
-
+        self.stack.push(result);
         self.instruction_ptr += 1;
+
+        Ok(())
+    }
+
+    pub fn eval(&mut self, instruction: &Instruction) -> ExecResult<()> {
+        // println!("{}: {:?}", instruction.mnemonic(), self.stack);
+        use Instruction as I;
+        match instruction {
+            I::Push(arg) => {
+                self.stack.push(*arg);
+                self.instruction_ptr += 1;
+            }
+            I::Pop => {
+                let _ = self.pop_stack("POP")?;
+                self.instruction_ptr += 1;
+            }
+            I::Add | I::Sub | I::Mul | I::Div => self.binop(instruction)?,
+            I::Dup => {
+                let value = self.pop_stack("DUP")?;
+                self.stack.push(value);
+                self.stack.push(value);
+                self.instruction_ptr += 1;
+            }
+            I::Swap => {
+                let a = self.pop_stack("SWAP")?;
+                let b = self.pop_stack("SWAP")?;
+                self.stack.push(a);
+                self.stack.push(b);
+                self.instruction_ptr += 1;
+            }
+            I::Jz(addr) => {
+                let value = self.pop_stack("JZ")?;
+                if value == 0 {
+                    self.instruction_ptr = *addr as usize;
+                }
+                else {
+                    self.instruction_ptr += 1;
+                }
+            }
+            I::Jnz(addr) => {
+                let value = self.pop_stack("JZ")?;
+                if value != 0 {
+                    self.instruction_ptr = *addr as usize;
+                }
+                else {
+                    self.instruction_ptr += 1;
+                }
+            }
+            I::Jmp(addr) => self.instruction_ptr = *addr as usize,
+            I::Printout => {
+                println!("{}", self.pop_stack("PRINTOUT")?);
+                self.instruction_ptr += 1;
+            }
+            I::Exit => {
+                let exit_code = self.stack.pop();
+                self.exited = Some(exit_code.unwrap_or(0) as i32);
+                self.instruction_ptr += 1;
+            }
+        }
+
+        Ok(())
     }
 }
