@@ -5,26 +5,28 @@ mod assembler;
 mod instruction;
 
 use stack_machine::*;
-
 use assembler::*;
+
+fn die(err: impl std::fmt::Display) -> ! {
+    eprintln!("{}", err);
+    std::process::exit(1);
+}
 
 fn main() {
     let mut args = std::env::args();
     if args.len() != 2 {
-        eprintln!("Usage: {} <source file>", args.next().unwrap_or("stasm".to_string()));
-        std::process::exit(1);
+        die(format!("Usage: {} <source file>", args.next().unwrap_or("stasm".to_string())))
     }
 
     let mut parser = AsmParser::new(args.nth(1).unwrap());
     let instructions = parser.assemble();
     if let Err(err) = instructions {
-        eprintln!("{}", err);
-        std::process::exit(1);
+        die(err);
     }
 
     let mut machine = StackMachine::new();
     match machine.run(&instructions.unwrap()) {
         Ok(exit_code) => println!("[simulation exited with code {}]", exit_code),
-        Err(err) => println!("{}", err)
+        Err(err) => die(err)
     }
 }

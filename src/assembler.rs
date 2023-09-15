@@ -62,23 +62,19 @@ impl AsmParser {
 
     pub fn assemble(&mut self) -> ParseResult<Vec<Instruction>> {
         let file = File::open(self.filepath.clone())?;
-        let mut lines = BufReader::new(file).lines().enumerate();
+        let lines = BufReader::new(file).lines().enumerate();
         let mut instructions = vec![];
 
-        while let Some((lineno, line)) = lines.next() {
+        for (lineno, line) in lines {
             self.lineno = lineno + 1;
-            let line = line?;
-            if let Some(instruction) = self.parse_line(&line, &mut instructions)? {
+            if let Some(instruction) = self.parse_line(&line?, &mut instructions)? {
                 instructions.push(instruction);
             }
         }
 
-        if !self.relocs.is_empty() {
-            Err(self.parse_error(format!("could not resolve labels {:?}", self.relocs)))
-        }
-        else {
-            Ok(instructions)
-        }
+        self.relocs.is_empty()
+            .then_some(instructions)
+            .ok_or_else(|| self.parse_error(format!("could not resolve labels {:?}", self.relocs)))
     }
 
     fn parse_error(&self, err: String) -> ParseError {
@@ -91,10 +87,7 @@ impl AsmParser {
 
     fn label_addr(&mut self, label: String, instruction_addr: i64) -> i64 {
         *self.labels.get(&label).unwrap_or_else(|| {
-            if let Some(rel) = self.relocs.get_mut(&label) {
-                rel.push(instruction_addr)
-            }
-            else {
+            if self.relocs.get_mut(&label).map(|rel| rel.push(instruction_addr)).is_none() {
                 self.relocs.insert(label, vec![instruction_addr]);
             }
             &0
@@ -104,17 +97,15 @@ impl AsmParser {
     fn parse_instruction(&mut self, mnemonic: &str, arg: Option<&str>, instruction_addr: i64) -> ParseResult<Instruction> {
         use Instruction as I;
 
-        let arg = arg.map(|arg| arg.parse::<Value>().unwrap_or_else(|_| {
-            self.label_addr(arg.to_string(), instruction_addr)
-        }));
+        let arg = arg.map(|arg| arg.parse::<Value>().unwrap_or_else(|_| self.label_addr(arg.to_string(), instruction_addr)));
         match mnemonic {
-            "PUSH" => arg.map(I::Push).ok_or(self.parse_error(format!("`PUSH` expects one argument"))),
+            "PUSH" => arg.map(I::Push).ok_or(self.parse_error("`PUSH` expects one argument".to_string())),
             "POP" => Ok(I::Pop),
             "DUP" => Ok(I::Dup),
             "SWAP" => Ok(I::Swap),
-            "JZ" => arg.map(I::Jz).ok_or(self.parse_error(format!("`JMP` expects one argument"))),
-            "JNZ" => arg.map(I::Jnz).ok_or(self.parse_error(format!("`JMP` expects one argument"))),
-            "JMP" => arg.map(I::Jmp).ok_or(self.parse_error(format!("`JMP` expects one argument"))),
+            "JZ" => arg.map(I::Jz).ok_or(self.parse_error("`JMP` expects one argument".to_string())),
+            "JNZ" => arg.map(I::Jnz).ok_or(self.parse_error("`JMP` expects one argument".to_string())),
+            "JMP" => arg.map(I::Jmp).ok_or(self.parse_error("`JMP` expects one argument".to_string())),
             "ADD" => Ok(I::Add),
             "SUB" => Ok(I::Sub),
             "MUL" => Ok(I::Mul),
@@ -125,9 +116,9 @@ impl AsmParser {
         }
     }
 
-    fn parse_line(&mut self, line: &String, instructions: &mut Vec<Instruction>) -> ParseResult<Option<Instruction>> {
+    fn parse_line(&mut self, line: &str, instructions: &mut Vec<Instruction>) -> ParseResult<Option<Instruction>> {
         let line = line.trim();
-        if line.starts_with(";") || line.is_empty() {
+        if line.starts_with(';') || line.is_empty() {
             return Ok(None)
         }
 
@@ -138,29 +129,26 @@ impl AsmParser {
         let mnemonic = attribs.next().unwrap();
 
         let mut arg = attribs.next();
-        if let Some(comment) = arg && comment.starts_with(";") {
+        if let Some(comment) = arg && comment.starts_with(';') {
             arg = None;
         }
-        else if let Some(next) = attribs.next() && !next.starts_with(";") {
+        else if let Some(next) = attribs.next() && !next.starts_with(';') {
             return Err(self.parse_error(format!("too many arguments: `{}`", next)))
         }
 
         let instruction_addr = instructions.len() as i64;
 
         // label detected
-        if mnemonic.ends_with(":") {
-            let label = mnemonic[..mnemonic.len()-1].to_string();
-            self.relocs.remove(&label).map(|rel|
+        if let Some(label) = mnemonic.strip_suffix(':') {
+            if let Some(rel) = self.relocs.remove(&label.to_string()) { 
                 rel.iter().for_each(|ri| 
-                    instructions.get_mut(*ri as usize).map(|i| 
+                    if let Some(i) = instructions.get_mut(*ri as usize) {
                         i.set_arg(instruction_addr)
-                    ).unwrap_or_default()
+                    }
                 )
-            );
+            }
 
-            self.labels.insert(label, instruction_addr);
-
-
+            self.labels.insert(label.to_string(), instruction_addr);
             Ok(None)
         }
         else {

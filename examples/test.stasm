@@ -9,4 +9,9 @@ loop:
     SUB      ; subtract 1 from value
     DUP      ; duplicate for loop
     JNZ loop ; jump if value != 0
+    JMP foo
+    EXIT
+foo:
+    PUSH 69
+    PRINTOUT
     EXIT

@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use colored::Colorize;
 use crate::instruction::*;
 
@@ -14,6 +16,8 @@ impl std::fmt::Display for ExecError {
         write!(f, "{} (@{}): {}", "Panic:".bold().red(), format!("{:04x}", self.addr).blue(), self.err)
     }
 }
+
+impl Error for ExecError {}
 
 fn print_header(header: &str, width: usize) {
     println!();
@@ -100,9 +104,9 @@ impl StackMachine {
         self.stack.pop().ok_or_else(|| self.panic(format!("not enough values on stack for `{}`", mnemonic)))
     }
 
-    fn binop(&mut self, op: &Instruction) -> ExecResult<()> {
-        let a = self.pop_stack(&op.mnemonic())?;
-        let b = self.pop_stack(&op.mnemonic())?;
+    fn bin_op(&mut self, op: &Instruction) -> ExecResult<()> {
+        let a = self.pop_stack(op.mnemonic())?;
+        let b = self.pop_stack(op.mnemonic())?;
 
         use Instruction as I;
         let result = match op {
@@ -131,7 +135,7 @@ impl StackMachine {
                 let _ = self.pop_stack("POP")?;
                 self.instruction_ptr += 1;
             }
-            I::Add | I::Sub | I::Mul | I::Div => self.binop(instruction)?,
+            I::Add | I::Sub | I::Mul | I::Div => self.bin_op(instruction)?,
             I::Dup => {
                 let value = self.pop_stack("DUP")?;
                 self.stack.push(value);
