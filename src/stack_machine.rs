@@ -1,7 +1,7 @@
-use std::error::Error;
+use std::{error::Error, io::Write};
 
 use colored::Colorize;
-use crate::instruction::*;
+use crate::{instruction::*, debug_info::DebugInfo};
 
 pub type ExecResult<T> = Result<T, ExecError>;
 
@@ -38,18 +38,18 @@ pub struct StackMachine {
 
     // debugging
     term_width: u16,
-    print_dbg_info: bool,
+    debug_info: DebugInfo,
 }
 
 impl StackMachine {
-    pub fn new(print_dbg_info: bool) -> Self {
+    pub fn new(debug_info: DebugInfo) -> Self {
         let term_size = termsize::get().unwrap_or(termsize::Size { rows: 25, cols: 80 });
         Self {
             instruction_ptr: 0usize,
             stack: vec![],
             exited: None,
             term_width: term_size.cols,
-            print_dbg_info
+            debug_info
         }
     }
 
@@ -62,12 +62,18 @@ impl StackMachine {
                 "  "
             }
             .green();
-            println!(
+            print!(
                 "{:<5}{} {}",
                 format!("{:04x}", addr).blue(),
                 ip_marker,
                 instruction
             );
+
+            if let Some(label) = self.debug_info.label_at(addr as i64) {
+                print!("\t{}", format!("; {}", label).bright_black())
+            }
+
+            println!()
         }
 
         print_header("Stack", self.term_width as usize);
@@ -76,21 +82,28 @@ impl StackMachine {
             println!("{}\n", "<no entries>".bright_black())
         }
         for (addr, value) in self.stack.iter().enumerate() {
-            println!(
+            print!(
                 "{:<6}{}",
                 format!("{:04x}", addr).blue(),
                 format!("{}", value).red()
-            )
+            );
+
+            let ch = *value as u8 as char;
+            if *value >= 0 && *value <= u8::MAX as i64 && is_printable(ch) {
+                print!("\t{:?}", ch)
+            }
+
+            println!()
         }
     }
 
     pub fn run(&mut self, instructions: &[Instruction]) -> ExecResult<i32> {
-        if self.print_dbg_info {
+        if self.debug_info.verbose() {
             self.disassembly(instructions);
         }
 
         while self.exited.is_none() && self.instruction_ptr < instructions.len() {
-            self.eval(&instructions[self.instruction_ptr])?;
+            self.eval(&instructions[self.instruction_ptr], instructions)?;
         }
 
         self.exited.ok_or_else(|| self.panic("no instruction left".to_string()))
@@ -127,8 +140,35 @@ impl StackMachine {
         Ok(())
     }
 
-    pub fn eval(&mut self, instruction: &Instruction) -> ExecResult<()> {
+    pub fn handle_breakpoint(&mut self, instructions: &[Instruction]) -> ExecResult<()> {
+        self.disassembly(instructions);
+        println!();
+
+        loop {
+            print!("{} continue? [Y/n] ", "Breakpoint:".bold().cyan());
+            let _ = std::io::stdout().flush();
+
+            let mut buffer = String::new();
+            let _ = std::io::stdin().read_line(&mut buffer);
+            match buffer.trim().to_uppercase().as_str() {
+                "Y" | "" => {
+                    return Ok(())
+                }
+                "N" => {
+                    return Err(self.panic("execution aborted at breakpoint".to_string()))
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn eval(&mut self, instruction: &Instruction, instructions: &[Instruction]) -> ExecResult<()> {
         // println!("{}: {:?}", instruction.mnemonic(), self.stack);
+
+        if self.debug_info.breakpoint_at(self.instruction_ptr as i64) {
+            self.handle_breakpoint(instructions)?
+        }
+
         use Instruction as I;
         match instruction {
             I::Push(arg) => {
@@ -153,27 +193,40 @@ impl StackMachine {
                 self.stack.push(b);
                 self.instruction_ptr += 1;
             }
-            I::Jz(addr) => {
+            I::Jz => {
+                let addr = self.pop_stack("JZ")?;
                 let value = self.pop_stack("JZ")?;
                 if value == 0 {
-                    self.instruction_ptr = *addr as usize;
+                    self.instruction_ptr = addr as usize;
                 }
                 else {
                     self.instruction_ptr += 1;
                 }
             }
-            I::Jnz(addr) => {
+            I::Jnz => {
+                let addr = self.pop_stack("JNZ")?;
                 let value = self.pop_stack("JZ")?;
                 if value != 0 {
-                    self.instruction_ptr = *addr as usize;
+                    self.instruction_ptr = addr as usize;
                 }
                 else {
                     self.instruction_ptr += 1;
                 }
             }
-            I::Jmp(addr) => self.instruction_ptr = *addr as usize,
+            I::Jmp => self.instruction_ptr = self.pop_stack("JMP")? as usize,
+            I::Call => {
+                let addr = self.pop_stack("CALL")?;
+                self.stack.push(self.instruction_ptr as Value + 1);
+                self.instruction_ptr = addr as usize;
+            }
             I::Printout => {
                 println!("{}", self.pop_stack("PRINTOUT")?);
+                self.instruction_ptr += 1;
+            }
+            I::Printstr => {
+                while let ch = self.pop_stack("PRINTSTR")? && ch != 0 {
+                    print!("{}", ch as u8 as char);
+                }
                 self.instruction_ptr += 1;
             }
             I::Exit => {
@@ -185,4 +238,8 @@ impl StackMachine {
 
         Ok(())
     }
+}
+
+fn is_printable(ch: char) -> bool {
+    ch.is_ascii_digit() || ch.is_ascii_lowercase() || ch.is_ascii_uppercase() || ch == '!' || ch == '\"' || ch == '#' || ch == '$' || ch == '%' || ch == '&' || ch == '\'' || ch == '(' || ch == ')' || ch == '*' || ch == '+' || ch == ',' || ch == '-' || ch == '.' || ch == '/' || ch == ':' || ch == ';' || ch == '<' || ch == '=' || ch == '>' || ch == '?' || ch == '@' || ch == '[' || ch == '\\' || ch == ']' || ch == '^' || ch == '`' || ch == '{' || ch == '|' || ch == '}'
 }

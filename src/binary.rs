@@ -55,11 +55,11 @@ pub struct Binary {
 }
 
 const MAGIC: [u8; 5] = [
-    '.' as u8,
-    'S' as u8,
-    'P' as u8,
-    'V' as u8,
-    'M' as u8
+    b'.',
+    b'S',
+    b'P',
+    b'V',
+    b'M'
 ];
 
 impl Binary {
@@ -101,11 +101,11 @@ impl Binary {
         let file = File::create(filepath)?;
         let mut writer = BufWriter::new(file);
 
-        writer.write(&MAGIC)?;
-        writer.write(self.header.as_bytes())?;
+        writer.write_all(&MAGIC)?;
+        writer.write_all(self.header.as_bytes())?;
 
         for instruction in self.instructions {
-            writer.write(&instruction.as_bytes())?;
+            writer.write_all(&instruction.as_bytes())?;
         }
 
         writer.flush()?;
@@ -131,15 +131,17 @@ fn read_instruction(file: &mut File) -> LoadResult<Instruction> {
         1 => Ok(I::Pop),
         2 => Ok(I::Dup),
         3 => Ok(I::Swap),
-        4 => Ok(I::Jz(read_arg(file)?)),
-        5 => Ok(I::Jnz(read_arg(file)?)),
-        6 => Ok(I::Jmp(read_arg(file)?)),
+        4 => Ok(I::Jz),
+        5 => Ok(I::Jnz),
+        6 => Ok(I::Jmp),
         7 => Ok(I::Add),
         8 => Ok(I::Sub),
         9 => Ok(I::Mul),
         10 => Ok(I::Div),
         11 => Ok(I::Exit),
         12 => Ok(I::Printout),
+        13 => Ok(I::Call),
+        14 => Ok(I::Printstr),
         _ => Err(LoadError::Load(format!("no such mnemonic `{}`", mnemonic)))
     }
 }

@@ -1,0 +1,4 @@
+@PushStr "Hello, World!\n"
+@Break
+PRINTSTR
+EXIT

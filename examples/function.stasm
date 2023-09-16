@@ -1,0 +1,8 @@
+PUSH print_nice
+CALL
+EXIT
+
+print_nice:
+    PUSH 69
+    PRINTOUT
+    JMP

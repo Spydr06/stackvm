@@ -8,10 +8,8 @@ loop:
     SWAP     ; swap for correct ordering
     SUB      ; subtract 1 from value
     DUP      ; duplicate for loop
-    JNZ loop ; jump if value != 0
-    JMP foo
+    PUSH loop
+    JNZ      ; jump to `loop` if value != 0
+    POP
     EXIT
-foo:
-    PUSH 69
-    PRINTOUT
-    EXIT
+    
