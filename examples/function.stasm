@@ -1,8 +1,9 @@
-PUSH print_nice
+PUSH print_some_number
 CALL
 EXIT
 
-print_nice:
-    PUSH 69
+print_some_number:
+    PUSH 42
+@Break
     PRINTOUT
     JMP
